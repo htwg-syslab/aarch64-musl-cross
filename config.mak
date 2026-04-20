@@ -19,9 +19,16 @@
 
 TARGET = aarch64-linux-musl
 
-# Compiler + Debugger-Versionen matchend Bootlin 2024.02-1
-GCC_VER = 12.3.0
-GDB_VER = 13.2
+# GCC 12.x matchend Bootlin 2024.02-1-Linie (Bootlin: 12.3.0).
+# musl-cross-make hat auf master nur 12.4.0 in der 12er-Serie
+# (hashes/gcc-12.4.0.tar.xz.sha1) — reine Patch-Level-Differenz, ABI-kompatibel.
+GCC_VER = 12.4.0
+
+# gdb wird von musl-cross-make nicht gebaut (kein gdb-Eintrag in Makefile
+# oder hashes/). Fuer Target-Debugging im esyslab-Container steht
+# `gdb-multiarch` (Ubuntu-Paket) bereit, das aarch64-Targets unterstuetzt.
+# Falls ein nativer aarch64-linux-musl-gdb gewuenscht wird, waere ein
+# separater Post-Build-Step im release.yml noetig — siehe Issue-Tracker.
 
 COMMON_CONFIG += --enable-languages=c,c++
 COMMON_CONFIG += --disable-nls
