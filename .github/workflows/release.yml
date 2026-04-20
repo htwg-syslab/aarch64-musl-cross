@@ -59,6 +59,20 @@ jobs:
           cd build-musl-cross-make
           make install OUTPUT="${GITHUB_WORKSPACE}/${{ steps.version.outputs.out_dir }}"
           cd "${GITHUB_WORKSPACE}"
+
+          # Buildroot External-Toolchain-Handling sucht Header unter
+          # <PREFIX>/usr/include/{linux,...} (FHS-Layout, wie Bootlin-Tarballs).
+          # musl-cross-make legt sie direkt nach <PREFIX>/include/ und <PREFIX>/lib/.
+          # Symlink-Overlay macht beides kompatibel ohne Duplizierung.
+          TARGET_DIR="${{ steps.version.outputs.out_dir }}/aarch64-linux-musl"
+          if [ -d "$TARGET_DIR" ]; then
+            mkdir -p "$TARGET_DIR/usr"
+            [ -e "$TARGET_DIR/usr/include" ] || ln -sf ../include "$TARGET_DIR/usr/include"
+            [ -e "$TARGET_DIR/usr/lib"     ] || ln -sf ../lib     "$TARGET_DIR/usr/lib"
+          else
+            echo "WARN: Target-Dir $TARGET_DIR nicht gefunden — Layout-Fix uebersprungen"
+          fi
+
           tar cJf "${{ steps.version.outputs.out_dir }}.tar.xz" "${{ steps.version.outputs.out_dir }}"
           sha256sum "${{ steps.version.outputs.out_dir }}.tar.xz" > "${{ steps.version.outputs.out_dir }}.tar.xz.sha256"
           ls -lh ${{ steps.version.outputs.out_dir }}.tar.xz*
