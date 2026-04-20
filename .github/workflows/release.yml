@@ -1,0 +1,115 @@
+name: Release aarch64-musl Cross-Toolchain
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry-run: nur bauen, kein Release anlegen"
+        required: false
+        default: "false"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build + Release on ARM64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential wget xz-utils patch git texinfo bison flex \
+            libgmp-dev libmpc-dev libmpfr-dev
+
+      - name: Clone musl-cross-make
+        id: mcm
+        run: |
+          git clone --depth=1 https://github.com/richfelker/musl-cross-make build-musl-cross-make
+          cd build-musl-cross-make
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          cp ../config.mak .
+
+      - name: Derive version
+        id: version
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+            VERSION="${GITHUB_REF_NAME#v}"
+          else
+            VERSION="manual-$(date +%Y.%m.%d-%H%M)"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "out_dir=aarch64--musl--stable-$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Build toolchain
+        working-directory: build-musl-cross-make
+        run: |
+          make -j"$(nproc)"
+
+      - name: Install + pack
+        run: |
+          cd build-musl-cross-make
+          make install OUTPUT="${GITHUB_WORKSPACE}/${{ steps.version.outputs.out_dir }}"
+          cd "${GITHUB_WORKSPACE}"
+          tar cJf "${{ steps.version.outputs.out_dir }}.tar.xz" "${{ steps.version.outputs.out_dir }}"
+          sha256sum "${{ steps.version.outputs.out_dir }}.tar.xz" > "${{ steps.version.outputs.out_dir }}.tar.xz.sha256"
+          ls -lh ${{ steps.version.outputs.out_dir }}.tar.xz*
+
+      - name: Gather version info
+        id: info
+        run: |
+          cd "${{ steps.version.outputs.out_dir }}/bin"
+          GCC_V=$(./aarch64-linux-musl-gcc --version | head -1)
+          LD_V=$(./aarch64-linux-musl-ld --version | head -1)
+          echo "gcc=$GCC_V" >> "$GITHUB_OUTPUT"
+          echo "ld=$LD_V" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        run: |
+          cat > release-notes.md <<EOF
+          ## aarch64-musl Cross-Toolchain \`v${{ steps.version.outputs.version }}\`
+
+          Gebaut mit [musl-cross-make](https://github.com/richfelker/musl-cross-make)
+          commit \`${{ steps.mcm.outputs.commit }}\` auf \`ubuntu-24.04-arm\`.
+
+          ### Enthaltene Komponenten
+          - GCC: \`${{ steps.info.outputs.gcc }}\`
+          - Binutils: \`${{ steps.info.outputs.ld }}\`
+          - Libc: musl (Version siehe \`\${OUT}/aarch64-linux-musl/include/features.h\`)
+
+          ### Assets
+          - \`${{ steps.version.outputs.out_dir }}.tar.xz\` — Toolchain-Archiv
+          - \`${{ steps.version.outputs.out_dir }}.tar.xz.sha256\` — SHA256-Checksum
+
+          ### Installation
+          Siehe [README](../README.md) fuer Dockerfile-Snippet + Buildroot-Config.
+          EOF
+
+      - name: Upload artifacts (always)
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.version.outputs.out_dir }}
+          path: |
+            ${{ steps.version.outputs.out_dir }}.tar.xz
+            ${{ steps.version.outputs.out_dir }}.tar.xz.sha256
+            release-notes.md
+          retention-days: 7
+
+      - name: Create GitHub Release
+        if: github.ref_type == 'tag' && github.event.inputs.dry_run != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "aarch64-musl Cross-Toolchain ${{ steps.version.outputs.version }}" \
+            --notes-file release-notes.md \
+            "${{ steps.version.outputs.out_dir }}.tar.xz" \
+            "${{ steps.version.outputs.out_dir }}.tar.xz.sha256"
